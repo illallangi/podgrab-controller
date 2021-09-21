@@ -1,0 +1,129 @@
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{ selector }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{ selector }}
+    spec:
+      containers:
+      - env:
+        - name: PUID
+          valueFrom:
+            configMapKeyRef:
+              key: uid
+              name: {{ application_configmap['metadata']['name'] }}
+        - name: PGID
+          valueFrom:
+            configMapKeyRef:
+              key: gid
+              name: {{ application_configmap['metadata']['name'] }}
+        - name: TZ
+          valueFrom:
+            configMapKeyRef:
+              key: tz
+              name: {{ application_configmap['metadata']['name'] }}
+        image: "{{ spec['podgrabImage'] | default('docker.io/akhilrex/podgrab:1.0.0') }}"
+        imagePullPolicy: IfNotPresent
+        name: podgrab
+        ports:
+        - containerPort: 8080
+          name: podgrab
+        volumeMounts:
+        - mountPath: /config
+          name: persistence
+          subPath: config
+        - mountPath: /assets
+          name: {{ spec['data']['claimName'] }}
+          subPath: {{ spec['data']['subPath'] }}
+      - image: docker.io/illallangi/caddy:latest
+        imagePullPolicy: IfNotPresent
+        name: caddy
+        ports:
+        - containerPort: 65080
+          name: web
+        - containerPort: 65443
+          name: web-secure
+        volumeMounts:
+        - mountPath: /etc/caddy/Caddyfile
+          name: config
+          subPath: CaddyFile
+          readOnly: True
+        - mountPath: /etc/caddy/tls.crt
+          name: tls
+          subPath: tls.crt
+          readOnly: True
+        - mountPath: /etc/caddy/tls.key
+          name: tls
+          subPath: tls.key
+          readOnly: True
+      - image: docker.io/illallangi/lsyncd:0.0.3
+        imagePullPolicy: IfNotPresent
+        name: lsyncd
+        volumeMounts:
+        - mountPath: /target
+          name: {{ spec['backup']['claimName'] }}
+          subPath: {{ spec['backup']['subPath'] }}
+        - mountPath: /source
+          name: persistence
+          subPath: config
+      initContainers:
+      - env:
+        - name: PERM_UID
+          valueFrom:
+            configMapKeyRef:
+              key: uid
+              name: {{ application_configmap['metadata']['name'] }}
+        - name: PERM_GID
+          valueFrom:
+            configMapKeyRef:
+              key: gid
+              name: {{ application_configmap['metadata']['name'] }}
+        name: init-backup-fixperms
+        image: docker.io/illallangi/toolbx:v0.32.0
+        command:
+        - fixperms.sh
+        - /mnt
+        volumeMounts:
+        - mountPath: /mnt
+          name: {{ spec['backup']['claimName'] }}
+          subPath: {{ spec['backup']['subPath'] }}
+      - env:
+        - name: PERM_UID
+          valueFrom:
+            configMapKeyRef:
+              key: uid
+              name: {{ application_configmap['metadata']['name'] }}
+        - name: PERM_GID
+          valueFrom:
+            configMapKeyRef:
+              key: gid
+              name: {{ application_configmap['metadata']['name'] }}
+        name: init-config-fixperms
+        image: docker.io/illallangi/toolbx:v0.32.0
+        command:
+        - fixperms.sh
+        - /mnt
+        volumeMounts:
+        - name: persistence
+          mountPath: /mnt
+          subPath: config
+      serviceAccount: {{ application_serviceaccount['metadata']['name'] }}
+      serviceAccountName: {{ application_serviceaccount['metadata']['name'] }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ application_configmap['metadata']['name'] }}
+      - name: tls
+        secret:
+          secretName: {{ tls_certificate['spec']['secretName'] }}
+      - name: persistence
+        persistentVolumeClaim:
+          claimName: {{ application_persistentvolumeclaim['metadata']['name'] }}
+{%- for o in [spec['data'], spec['backup']] | map(attribute='claimName') | unique %}
+      - name: {{ o }}
+        persistentVolumeClaim:
+          claimName: {{ o }}
+{%- endfor %}

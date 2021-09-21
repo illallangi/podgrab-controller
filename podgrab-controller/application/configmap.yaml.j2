@@ -1,0 +1,27 @@
+data:
+  uid: "1061"
+  gid: "1061"
+  tz: Australia/Melbourne  
+  uriPath: '/{{ spec['uriPath'] }}'
+  CaddyFile: |-
+    {
+      admin off
+      http_port 65080
+      https_port 65443
+      debug
+    }
+    :65443 {
+      tls /etc/caddy/tls.crt /etc/caddy/tls.key
+      route /.well-known/teapot {
+        teapot
+      }
+      route /.well-known/health {
+        respond 200
+      }
+      route /* {
+        reverse_proxy http://localhost:8080
+      }
+    }
+    :5800 {
+      respond /.well-known/health 200
+    }
